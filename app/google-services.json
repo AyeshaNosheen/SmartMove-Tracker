@@ -1,0 +1,55 @@
+{
+  "project_info": {
+    "project_number": "548531294143",
+    "firebase_url": "https://smartmove-iiui-default-rtdb.firebaseio.com",
+    "project_id": "smartmove-iiui",
+    "storage_bucket": "smartmove-iiui.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:548531294143:android:f4b532b4fa182739a65b0a",
+        "android_client_info": {
+          "package_name": "com.smartmove.iiui"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyATMqxbCQQCACo4L2tnbxv_S9Zh4XINovg"
+        },
+        {
+          "current_key": "AIzaSyASkDNI6OjFDxroZ-ygaEk-BGBKs4uZAnM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:548531294143:android:9b46180310088769a65b0a",
+        "android_client_info": {
+          "package_name": "com.smartmove.tracker"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyATMqxbCQQCACo4L2tnbxv_S9Zh4XINovg"
+        },
+        {
+          "current_key": "AIzaSyASkDNI6OjFDxroZ-ygaEk-BGBKs4uZAnM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
