@@ -8,19 +8,19 @@ import androidx.core.app.NotificationCompat
 import com.google.android.gms.location.*
 import com.google.firebase.database.ktx.database
 import com.google.firebase.ktx.Firebase
-import androidx.annotation.RequiresApi
-import android.os.Build
 
 class LocationForegroundService : Service() {
 
     private lateinit var fusedLocationClient : FusedLocationProviderClient
     private var locationCallback             : LocationCallback? = null
+    private var busId                        : String = ""
     private val db = Firebase.database.reference
 
     companion object {
-        const val CHANNEL_ID    = "location_channel"
+        const val CHANNEL_ID      = "location_channel"
         const val NOTIFICATION_ID = 1
-        const val BUS_ID        = "KCrQsdijjF3H3BR616C6"
+        // Keep for backward compatibility
+        const val BUS_ID          = "KCrQsdijjF3H3BR616C6"
     }
 
     override fun onCreate() {
@@ -30,9 +30,11 @@ class LocationForegroundService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        startForeground(NOTIFICATION_ID, buildNotification("Starting GPS..."))
+        // Get busId from intent, fallback to default
+        busId = intent?.getStringExtra("BUS_ID") ?: BUS_ID
+        startForeground(NOTIFICATION_ID, buildNotification("Starting GPS for Bus..."))
         startLocationUpdates()
-        return START_STICKY // restart if killed
+        return START_STICKY
     }
 
     private fun startLocationUpdates() {
@@ -49,13 +51,12 @@ class LocationForegroundService : Service() {
                 val location = result.lastLocation ?: return
                 val speedKmh = location.speed * 3.6
 
-                // Update notification with current location
                 updateNotification("📍 Lat: ${"%.4f".format(location.latitude)}, Speed: ${"%.1f".format(speedKmh)} km/h")
 
-                // Send to Firebase
-                db.child("busLocations").child(BUS_ID).setValue(
+                // Send to Firebase using the selected busId
+                db.child("busLocations").child(busId).setValue(
                     mapOf(
-                        "busId"       to BUS_ID,
+                        "busId"       to busId,
                         "latitude"    to location.latitude,
                         "longitude"   to location.longitude,
                         "speed"       to speedKmh,
@@ -76,7 +77,7 @@ class LocationForegroundService : Service() {
             e.printStackTrace()
         }
     }
-    @RequiresApi(Build.VERSION_CODES.O)
+
     private fun createNotificationChannel() {
         val channel = NotificationChannel(
             CHANNEL_ID,
@@ -95,7 +96,6 @@ class LocationForegroundService : Service() {
             this, 0, intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-
         return NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("🚌 SmartMove Tracker")
             .setContentText(text)
@@ -113,7 +113,9 @@ class LocationForegroundService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         locationCallback?.let { fusedLocationClient.removeLocationUpdates(it) }
-        db.child("busLocations").child(BUS_ID).child("isOnline").setValue(false)
+        if (busId.isNotEmpty()) {
+            db.child("busLocations").child(busId).child("isOnline").setValue(false)
+        }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null

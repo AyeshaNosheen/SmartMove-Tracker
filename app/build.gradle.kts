@@ -54,6 +54,8 @@ dependencies {
     implementation(platform("com.google.firebase:firebase-bom:33.1.2"))
     implementation("com.google.firebase:firebase-database-ktx")
 
+    implementation("com.google.firebase:firebase-firestore-ktx")
+
     // Location
     implementation("com.google.android.gms:play-services-location:21.3.0")
 
