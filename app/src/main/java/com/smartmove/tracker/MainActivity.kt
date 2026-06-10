@@ -1,9 +1,10 @@
 package com.smartmove.tracker
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
-import android.os.Looper
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -21,24 +22,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
-import com.google.android.gms.location.*
-import com.google.firebase.database.ktx.database
-import com.google.firebase.ktx.Firebase
 
-private const val BUS_ID = "KCrQsdijjF3H3BR616C6"
 private val DarkGreen   = Color(0xFF0D3D26)
 private val AccentGreen = Color(0xFF7DCCA0)
 
 class MainActivity : ComponentActivity() {
-
-    private lateinit var fusedLocationClient : FusedLocationProviderClient
-    private var locationCallback             : LocationCallback? = null
-    private var timerHandler                 : android.os.Handler? = null
-    private var timerRunnable                : Runnable? = null
-    private val db = Firebase.database.reference
-
-    // Shared state for UI updates
-    var onLocationSent: ((Double, Double, Double, Int) -> Unit)? = null
 
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -46,56 +34,35 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
-
-        var updateCount = 0
 
         setContent {
-            var isTracking  by remember { mutableStateOf(false) }
-            var statusText  by remember { mutableStateOf("Not tracking") }
-            var latText     by remember { mutableStateOf("--") }
-            var lonText     by remember { mutableStateOf("--") }
-            var speedText   by remember { mutableStateOf("--") }
-            var countText   by remember { mutableStateOf(0) }
-
-            // Connect callback to update UI
-            onLocationSent = { lat, lon, speed, count ->
-                latText   = "%.6f".format(lat)
-                lonText   = "%.6f".format(lon)
-                speedText = "%.1f".format(speed)
-                countText = count
-            }
+            var isTracking by remember { mutableStateOf(false) }
+            var statusText by remember { mutableStateOf("Not tracking") }
 
             MaterialTheme {
                 TrackerScreen(
                     isTracking    = isTracking,
                     statusText    = statusText,
-                    latText       = latText,
-                    lonText       = lonText,
-                    speedText     = speedText,
-                    updateCount   = countText,
                     onStartTracking = {
-                        startTracking { lat, lon, speed ->
-                            updateCount++
-                            onLocationSent?.invoke(lat, lon, speed, updateCount)
-                        }
+                        startTrackingService()
                         isTracking = true
-                        statusText = "Sending location every 5 sec..."
+                        statusText = "Tracking in background..."
                     },
                     onStopTracking = {
-                        stopTracking()
+                        stopTrackingService()
                         isTracking = false
                         statusText = "Tracking stopped"
-                        updateCount = 0
                     },
                     hasPermission     = { hasLocationPermission() },
                     requestPermission = {
-                        requestPermissionLauncher.launch(
-                            arrayOf(
-                                Manifest.permission.ACCESS_FINE_LOCATION,
-                                Manifest.permission.ACCESS_COARSE_LOCATION
-                            )
+                        val permissions = mutableListOf(
+                            Manifest.permission.ACCESS_FINE_LOCATION,
+                            Manifest.permission.ACCESS_COARSE_LOCATION
                         )
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            permissions.add(Manifest.permission.POST_NOTIFICATIONS)
+                        }
+                        requestPermissionLauncher.launch(permissions.toTypedArray())
                     }
                 )
             }
@@ -108,87 +75,18 @@ class MainActivity : ComponentActivity() {
         ) == PackageManager.PERMISSION_GRANTED
     }
 
-    private fun sendToFirebase(lat: Double, lon: Double, speed: Double, callback: (Double, Double, Double) -> Unit) {
-        db.child("busLocations").child(BUS_ID).setValue(
-            mapOf(
-                "busId"       to BUS_ID,
-                "latitude"    to lat,
-                "longitude"   to lon,
-                "speed"       to speed,
-                "isOnline"    to true,
-                "lastUpdated" to System.currentTimeMillis()
-            )
-        ).addOnSuccessListener {
-            android.util.Log.d("TrackerApp", "✅ Sent to Firebase: $lat, $lon")
-            callback(lat, lon, speed)
-        }.addOnFailureListener { e ->
-            android.util.Log.e("TrackerApp", "❌ Failed: ${e.message}")
+    private fun startTrackingService() {
+        val intent = Intent(this, LocationForegroundService::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(intent)
+        } else {
+            startService(intent)
         }
     }
 
-    private fun startTracking(onSent: (Double, Double, Double) -> Unit) {
-        if (!hasLocationPermission()) return
-
-        val request = LocationRequest.Builder(
-            Priority.PRIORITY_HIGH_ACCURACY, 5000L
-        ).apply {
-            setMinUpdateIntervalMillis(3000L)
-            setMinUpdateDistanceMeters(0f)
-            setWaitForAccurateLocation(false)
-        }.build()
-
-        locationCallback = object : LocationCallback() {
-            override fun onLocationResult(result: LocationResult) {
-                val location = result.lastLocation ?: return
-                val speedKmh = location.speed * 3.6
-                sendToFirebase(location.latitude, location.longitude, speedKmh, onSent)
-            }
-        }
-
-        try {
-            fusedLocationClient.requestLocationUpdates(
-                request,
-                locationCallback!!,
-                Looper.getMainLooper()
-            )
-        } catch (e: SecurityException) {
-            e.printStackTrace()
-        }
-
-        // Timer — forces update every 5 seconds even when stationary
-        timerHandler  = android.os.Handler(Looper.getMainLooper())
-        timerRunnable = object : Runnable {
-            override fun run() {
-                if (locationCallback != null) {
-                    try {
-                        fusedLocationClient.lastLocation.addOnSuccessListener { location ->
-                            if (location != null) {
-                                val speedKmh = location.speed * 3.6
-                                sendToFirebase(location.latitude, location.longitude, speedKmh, onSent)
-                            }
-                        }
-                    } catch (e: SecurityException) {
-                        e.printStackTrace()
-                    }
-                    timerHandler?.postDelayed(this, 5000)
-                }
-            }
-        }
-        timerHandler?.postDelayed(timerRunnable!!, 5000)
-    }
-
-    private fun stopTracking() {
-        locationCallback?.let { fusedLocationClient.removeLocationUpdates(it) }
-        locationCallback = null
-        timerRunnable?.let { timerHandler?.removeCallbacks(it) }
-        timerRunnable = null
-        timerHandler  = null
-        db.child("busLocations").child(BUS_ID).child("isOnline").setValue(false)
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
-        stopTracking()
+    private fun stopTrackingService() {
+        val intent = Intent(this, LocationForegroundService::class.java)
+        stopService(intent)
     }
 }
 
@@ -196,10 +94,6 @@ class MainActivity : ComponentActivity() {
 fun TrackerScreen(
     isTracking        : Boolean,
     statusText        : String,
-    latText           : String,
-    lonText           : String,
-    speedText         : String,
-    updateCount       : Int,
     onStartTracking   : () -> Unit,
     onStopTracking    : () -> Unit,
     hasPermission     : () -> Boolean,
@@ -212,6 +106,7 @@ fun TrackerScreen(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
 
+        // ── Header ─────────────────────────────────────────
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -227,6 +122,7 @@ fun TrackerScreen(
 
         Spacer(modifier = Modifier.height(40.dp))
 
+        // ── Status Circle ──────────────────────────────────
         Box(
             modifier         = Modifier
                 .size(160.dp)
@@ -254,24 +150,47 @@ fun TrackerScreen(
             fontWeight = FontWeight.Medium
         )
 
-        Spacer(modifier = Modifier.height(32.dp))
+        Spacer(modifier = Modifier.height(16.dp))
 
+        // ── Info card ──────────────────────────────────────
         Card(
             modifier  = Modifier.fillMaxWidth().padding(horizontal = 24.dp),
             shape     = RoundedCornerShape(16.dp),
             colors    = CardDefaults.cardColors(containerColor = Color.White)
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
-                InfoRow("Bus ID",    BUS_ID.take(12) + "...")
-                InfoRow("Latitude",  latText)
-                InfoRow("Longitude", lonText)
-                InfoRow("Speed",     "$speedText km/h")
-                InfoRow("Updates",   "$updateCount sent")
+                InfoRow("Bus ID",  LocationForegroundService.BUS_ID.take(12) + "...")
+                InfoRow("Status", if (isTracking) "🟢 Sending every 5 sec" else "⚫ Not sending")
+                InfoRow("Mode",   if (isTracking) "Background (Foreground Service)" else "Idle")
             }
         }
 
-        Spacer(modifier = Modifier.height(40.dp))
+        Spacer(modifier = Modifier.height(32.dp))
 
+        if (isTracking) {
+            Card(
+                modifier  = Modifier.fillMaxWidth().padding(horizontal = 24.dp),
+                shape     = RoundedCornerShape(12.dp),
+                colors    = CardDefaults.cardColors(containerColor = Color(0xFFE8F5E9))
+            ) {
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text("ℹ️", fontSize = 16.sp)
+                    Text(
+                        text     = "You can minimize this app — tracking continues in background!",
+                        fontSize = 12.sp,
+                        color    = Color(0xFF2E7D32)
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(32.dp))
+
+        // ── Start / Stop Button ────────────────────────────
         Button(
             onClick = {
                 if (!hasPermission()) {
@@ -280,9 +199,12 @@ fun TrackerScreen(
                 }
                 if (isTracking) onStopTracking() else onStartTracking()
             },
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 24.dp).height(56.dp),
-            shape    = RoundedCornerShape(16.dp),
-            colors   = ButtonDefaults.buttonColors(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp)
+                .height(56.dp),
+            shape  = RoundedCornerShape(16.dp),
+            colors = ButtonDefaults.buttonColors(
                 containerColor = if (isTracking) Color(0xFFB71C1C) else DarkGreen
             )
         ) {
